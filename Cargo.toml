@@ -1,0 +1,18 @@
+[package]
+name = "leb128-rs"
+version = "0.1.0"
+edition = "2021"
+description = """
+  TODO
+"""
+license = "BSD-3-Clause"
+readme = "README.md"
+repository = "https://github.com/ericlagergren/leb128"
+keywords = [ "leb128", "varint", "encoding", "vlq" ]
+categories = [ "no-std", "no-std::no-alloc" ]
+
+[dependencies]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docs"]
