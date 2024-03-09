@@ -1,17 +1,29 @@
-use core::fmt;
-use core::mem;
+use core::{fmt, mem};
 
 mod private {
-    pub trait Sealed {
-        type Buf: 'static;
+    use super::Overflow;
+
+    pub trait Sealed: Sized {
+        type Buf: AsRef<[u8]> + Default + 'static;
         fn write(self, buf: &mut Self::Buf) -> usize;
+        fn try_write(self, buf: &mut [u8]) -> Option<usize>;
+        fn read<I, E>(src: I) -> Result<Self, E>
+        where
+            I: IntoIterator<Item = Result<u8, E>>,
+            E: From<Overflow>;
     }
 }
+pub(crate) use private::Sealed;
 
 /// An integer that can be LEB128-encoded.
-pub trait Integer: private::Sealed {
+pub trait Integer: Sealed {
     /// The maximum size in bytes of the LEB128-encoded integer.
     const MAX_LEN: usize;
+}
+
+trait ByteRead {
+    type Error: From<Overflow>;
+    fn read_byte(&mut self) -> Result<Option<u8>, Self::Error>;
 }
 
 macro_rules! impl_integer {
@@ -26,10 +38,40 @@ macro_rules! impl_integer {
         impl Integer for $unsigned {
             const MAX_LEN: usize = $umax;
         }
-        impl private::Sealed for $unsigned {
+        impl Sealed for $unsigned {
             type Buf = [u8; $umax];
+
             fn write(self, buf: &mut Self::Buf) -> usize {
                 $uwrite(buf, self)
+            }
+
+            fn try_write(self, buf: &mut [u8]) -> Option<usize> {
+                $try_uwrite(buf, self)
+            }
+
+            fn read<I, E>(src: I) -> Result<Self, E>
+            where
+                I: IntoIterator<Item = Result<u8, E>>,
+                E: From<Overflow>,
+            {
+                let mut x = 0; // result
+                let mut s = 0; // shift
+                for (i, v) in src.into_iter().enumerate() {
+                    let v = v?;
+                    if i == $umax {
+                        return Err(Overflow(i + 1).into());
+                    }
+                    if v < 0x80 {
+                        if i == $umax - 1 && v > max_last_byte::<$unsigned>() {
+                            return Err(Overflow(i + 1).into());
+                        }
+                        x |= (v as $unsigned) << s;
+                        return Ok(x);
+                    }
+                    x |= ((v & 0x7f) as $unsigned) << s;
+                    s += 7;
+                }
+                Ok(0)
             }
         }
 
@@ -37,21 +79,6 @@ macro_rules! impl_integer {
         #[doc = stringify!($unsigned)]
         #[doc = "`."]
         pub const $umax: usize = max_len::<$unsigned>();
-
-        impl Integer for $signed {
-            const MAX_LEN: usize = $imax;
-        }
-        impl private::Sealed for $signed {
-            type Buf = [u8; $imax];
-            fn write(self, buf: &mut Self::Buf) -> usize {
-                $iwrite(buf, self)
-            }
-        }
-
-        #[doc = "The maximum size in bytes of a LEB128-encoded `"]
-        #[doc = stringify!($signed)]
-        #[doc = "`."]
-        pub const $imax: usize = max_len::<$signed>();
 
         /// Encodes `x` in LEB128 format, returning the number
         /// of bytes written to `buf`.
@@ -77,16 +104,6 @@ macro_rules! impl_integer {
             Some(n)
         }
 
-        /// Encodes `x` in LEB128 format and returns the number
-        /// of bytes written to `buf`.
-        pub fn $iwrite(buf: &mut [u8; $imax], x: $signed) -> usize {
-            let mut ux = (x as $unsigned) << 1;
-            if x < 0 {
-                ux ^= ux;
-            }
-            $uwrite(buf, ux)
-        }
-
         #[doc = "Decodes a LEB128-encoded `"]
         #[doc = stringify!($unsigned)]
         #[doc = "` from `buf`."]
@@ -98,6 +115,9 @@ macro_rules! impl_integer {
             let mut s = 0; // shift
             let mut i = 0;
             while i < buf.len() {
+                // The compiler can prove that this does not
+                // panic since we checked `i < buf.len()`.
+                #[allow(clippy::indexing_slicing)]
                 let v = buf[i];
                 if i == $umax {
                     return Err(Overflow(i + 1));
@@ -114,6 +134,60 @@ macro_rules! impl_integer {
                 i += 1;
             }
             Ok((0, 0))
+        }
+
+        impl Integer for $signed {
+            const MAX_LEN: usize = $imax;
+        }
+        impl Sealed for $signed {
+            type Buf = [u8; $imax];
+
+            fn write(self, buf: &mut Self::Buf) -> usize {
+                $iwrite(buf, self)
+            }
+
+            fn try_write(self, buf: &mut [u8]) -> Option<usize> {
+                $try_iwrite(buf, self)
+            }
+
+            fn read<I, E>(src: I) -> Result<Self, E>
+            where
+                I: IntoIterator<Item = Result<u8, E>>,
+                E: From<Overflow>,
+            {
+                let ux = <$unsigned as Sealed>::read(src)?;
+                let mut x = (ux >> 1) as $signed;
+                if ux & 1 != 0 {
+                    x = !x;
+                }
+                Ok(x)
+            }
+        }
+
+        #[doc = "The maximum size in bytes of a LEB128-encoded `"]
+        #[doc = stringify!($signed)]
+        #[doc = "`."]
+        pub const $imax: usize = max_len::<$signed>();
+
+        /// Encodes `x` in LEB128 format and returns the number
+        /// of bytes written to `buf`.
+        pub fn $iwrite(buf: &mut [u8; $imax], x: $signed) -> usize {
+            let mut ux = (x as $unsigned) << 1;
+            if x < 0 {
+                ux ^= ux;
+            }
+            $uwrite(buf, ux)
+        }
+
+        /// Tries to encode `x` in LEB128 format.
+        ///
+        /// It returns the number of bytes written to `buf`, or
+        /// `None` if `buf` is too small to fit `x`.
+        pub fn $try_iwrite(buf: &mut [u8], x: $signed) -> Option<usize> {
+            let mut tmp = [0u8; $imax];
+            let n = $iwrite(&mut tmp, x);
+            buf.get_mut(..n)?.copy_from_slice(&tmp[..n]);
+            Some(n)
         }
 
         #[doc = "Decodes a LEB128-encoded `"]
@@ -219,8 +293,8 @@ impl fmt::Display for Overflow {
     }
 }
 
-#[cfg(feature = "std")]
-#[cfg_attr(docs, doc(cfg(feature = "std")))]
+// #[cfg(feature = "std")]
+// #[cfg_attr(docs, doc(cfg(feature = "std")))]
 impl std::error::Error for Overflow {}
 
 #[cfg(test)]
