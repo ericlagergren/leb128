@@ -1,5 +1,5 @@
 [package]
-name = "leb128-rs"
+name = "encodingsrs"
 version = "0.1.0"
 edition = "2021"
 description = """

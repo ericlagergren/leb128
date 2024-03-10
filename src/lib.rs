@@ -1,4 +1,4 @@
-//! LEB128 (Little Endian Base 128) encoding.
+//! TODO
 
 #![cfg_attr(docs, feature(doc_cfg))]
 //#![cfg_attr(not(any(feature = "std", test)), no_std)]
@@ -27,9 +27,4 @@
     unused_qualifications
 )]
 
-mod io;
-mod leb128;
-
-//#[cfg(feature = "std")]
-pub use io::*;
-pub use leb128::*;
+pub mod leb128;
