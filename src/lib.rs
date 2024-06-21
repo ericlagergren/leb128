@@ -1,7 +1,7 @@
-//! TODO
+//! LEB-128 (varint) encoding.
 
 #![cfg_attr(docs, feature(doc_cfg))]
-//#![cfg_attr(not(any(feature = "std", test)), no_std)]
+#![cfg_attr(not(any(feature = "std", test)), no_std)]
 #![cfg_attr(not(any(feature = "std", test)), deny(clippy::std_instead_of_core))]
 #![deny(
     clippy::alloc_instead_of_core,
@@ -27,4 +27,15 @@
     unused_qualifications
 )]
 
-pub mod leb128;
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
+mod int;
+mod io;
+mod size;
+mod tests;
+
+pub use int::*;
+#[cfg(feature = "std")]
+pub use io::*;
+pub use size::*;

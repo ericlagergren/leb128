@@ -1,9 +1,9 @@
 [package]
-name = "encodingsrs"
+name = "leb128"
 version = "0.1.0"
 edition = "2021"
 description = """
-  TODO
+  LEB-128 (varint) encoding.
 """
 license = "BSD-3-Clause"
 readme = "README.md"
@@ -11,7 +11,26 @@ repository = "https://github.com/ericlagergren/leb128"
 keywords = [ "leb128", "varint", "encoding", "vlq" ]
 categories = [ "no-std", "no-std::no-alloc" ]
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docs)'] }
+
+[features]
+default = []
+
+# Enable `alloc`.
+alloc = []
+
+# Enable `std`.
+std = [
+	"alloc",
+]
+
 [dependencies]
+cfg-if = { version = "1.0.0" }
+
+[dev-dependencies]
+leb128 = { path = ".", features = ["std"] }
+rand = { version = "0.8.5" }
 
 [package.metadata.docs.rs]
 all-features = true

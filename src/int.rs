@@ -1,75 +1,83 @@
-//! LEB128 (Little Endian Base 128) encoding.
-
-mod io;
-use core::{fmt, mem};
-
-//#[cfg(feature = "std")]
-pub use io::*;
-
-/// Returns the number of bits needed to represent `x`.
-macro_rules! bitlen {
-    ($x:expr) => {{
-        if $x == 0 {
-            0
-        } else {
-            $x.ilog2() + 1
-        }
-    }};
-}
-
-/// Returns the number of bytes needed to encode `x`.
-macro_rules! encoded_len {
-    ($x:expr) => {{
-        (1 + (bitlen!($x) - 1) / 7) as usize
-    }};
-}
-
-/// Returns the maximum number of bytes needed to encode `T`.
-const fn max_len<T>() -> usize {
-    let bits = mem::size_of::<T>() * 8;
-    (bits + 7 - 1) / 7
-}
-
-/// Returns the maximum last value in an encoded `T`.
-const fn max_last_byte<T>() -> u8 {
-    let bits = mem::size_of::<T>() * 8;
-    (1 << (bits % 7)) - 1
-}
+use core::{fmt, fmt::Debug, hash::Hash};
 
 mod private {
     use super::Overflow;
 
-    pub trait Sealed: Sized {
+    pub trait Sealed: Copy + Sized {
+        /// The size of the integer in bits.
+        const BITS: u32;
+
+        /// The maximum size in bytes of the encoded integer.
+        const MAX_LEN: usize = ((Self::BITS + 6) / 7) as usize;
+
+        /// The maximum last byte in an encoded integer.
+        const MAX_LAST_BYTE: u8 = (1 << (Self::BITS % 7)) - 1;
+
+        /// A fixed-size buffer.
+        ///
+        /// Is always `[u8; Self::MAX_LEN]`.
         type Buf: Default + 'static;
+
+        /// Returns the number of bytes needed to encode the
+        /// number.
+        fn encoded_len(&self) -> usize;
+
+        /// Writes itself to `buf` and returns the slice of `buf`
+        /// that was written to.
         fn write(self, buf: &mut Self::Buf) -> &[u8];
+
+        /// Like [`write`][Self::write], but returns `None` if
+        /// `buf` is too small.
         fn try_write(self, buf: &mut [u8]) -> Option<&[u8]>;
+
+        /// Reads itself from `src`.
         fn read<I>(src: I) -> Result<(Self, usize), Overflow>
         where
             I: IntoIterator<Item = u8>;
     }
 
-    pub trait Signed {
+    /// A signed integer.
+    pub trait Signed: Sealed {
+        /// The corresponding unsigned type.
         type Unsigned;
+
         fn zigzag(self) -> Self::Unsigned;
     }
 
-    pub trait Unsigned {
+    /// An unsigned integer.
+    pub trait Unsigned: Sealed {
+        /// The corresponding signed type.
         type Signed;
+
         fn unzigzag(self) -> Self::Signed;
     }
 }
 pub(crate) use private::{Sealed, Signed, Unsigned};
 
 /// An integer that can be LEB128-encoded.
-pub trait Integer: Sealed {
-    /// The maximum size in bytes of the LEB128-encoded integer.
-    const MAX_LEN: usize;
+pub trait Integer:
+    Clone + Copy + Debug + Default + Eq + Hash + Ord + PartialEq + PartialOrd + Sealed
+{
+}
+
+/// Returns the number of bytes needed to encode this
+/// [`Integer`].
+pub const fn max_len<T: Integer>() -> usize {
+    T::MAX_LEN
+}
+
+/// Returns the number of bytes needed to encode the number.
+pub fn encoded_len<T: Integer>(x: T) -> usize {
+    x.encoded_len()
 }
 
 /// Tries to encode `x` in LEB128 format.
 ///
 /// It returns the portion of `buf` that was written to,
 /// or `None` if `buf` is too small to fit `x`.
+///
+/// In order to succeed, `buf` should be at least [`encoded_len`]
+/// bytes.
 pub fn try_write<T: Integer>(buf: &mut [u8], x: T) -> Option<&[u8]> {
     x.try_write(buf)
 }
@@ -91,9 +99,7 @@ macro_rules! impl_integer {
         $iwrite:ident, $try_iwrite:ident, $iread:ident,
         $imax:ident $(,)?
     ) => {
-        impl Integer for $unsigned {
-            const MAX_LEN: usize = max_len::<Self>();
-        }
+        impl Integer for $unsigned {}
 
         impl Unsigned for $unsigned {
             type Signed = $signed;
@@ -106,7 +112,21 @@ macro_rules! impl_integer {
         }
 
         impl Sealed for $unsigned {
+            const BITS: u32 = <$unsigned>::BITS;
+
             type Buf = [u8; Self::MAX_LEN];
+
+            fn encoded_len(&self) -> usize {
+                if cfg!(target_arch = "x86_64") {
+                    // OR in 1 to avoid branching.
+                    let nlz = (1 | self).leading_zeros();
+                    let bits = (Self::BITS - 1) - nlz;
+                    ((bits * 9 + (64 + 9)) / 64) as usize
+                } else {
+                    let nlz = self.leading_zeros();
+                    (((Self::BITS * 9 + 64) - (nlz * 9)) / 64) as usize
+                }
+            }
 
             fn write(mut self, buf: &mut Self::Buf) -> &[u8] {
                 // The compiler can prove that all indexing is in
@@ -124,7 +144,7 @@ macro_rules! impl_integer {
             }
 
             fn try_write(mut self, buf: &mut [u8]) -> Option<&[u8]> {
-                let n = encoded_len!(self);
+                let n = self.encoded_len();
                 let (last, rest) = buf.get_mut(..n)?.split_last_mut()?;
                 for v in rest {
                     *v = (self as u8) | 0x80;
@@ -145,7 +165,7 @@ macro_rules! impl_integer {
                         return Err(Overflow(i + 1));
                     }
                     if v < 0x80 {
-                        if i == Self::MAX_LEN - 1 && v > max_last_byte::<Self>() {
+                        if i == Self::MAX_LEN - 1 && v > Self::MAX_LAST_BYTE {
                             return Err(Overflow(i + 1));
                         }
                         x |= (v as Self) << s;
@@ -173,6 +193,9 @@ macro_rules! impl_integer {
         ///
         /// It returns the portion of `buf` that was written to,
         /// or `None` if `buf` is too small to fit `x`.
+        ///
+        /// In order to succeed, `buf` should be at least
+        /// [`encoded_len`] bytes.
         pub fn $try_uwrite(buf: &mut [u8], x: $unsigned) -> Option<&[u8]> {
             x.try_write(buf)
         }
@@ -187,9 +210,7 @@ macro_rules! impl_integer {
             <$unsigned>::read(buf.iter().copied())
         }
 
-        impl Integer for $signed {
-            const MAX_LEN: usize = max_len::<Self>();
-        }
+        impl Integer for $signed {}
 
         impl Signed for $signed {
             type Unsigned = $unsigned;
@@ -201,7 +222,14 @@ macro_rules! impl_integer {
         }
 
         impl Sealed for $signed {
+            const BITS: u32 = <$signed>::BITS;
+
             type Buf = [u8; Self::MAX_LEN];
+
+            #[inline(always)]
+            fn encoded_len(&self) -> usize {
+                self.zigzag().encoded_len()
+            }
 
             #[inline(always)]
             fn write(self, buf: &mut Self::Buf) -> &[u8] {
@@ -335,77 +363,10 @@ pub struct Overflow(
 
 impl fmt::Display for Overflow {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "integer overflow")
+        f.write_str("integer overflow")
     }
 }
 
-// #[cfg(feature = "std")]
-// #[cfg_attr(docs, doc(cfg(feature = "std")))]
+#[cfg(feature = "std")]
+#[cfg_attr(docs, doc(cfg(feature = "std")))]
 impl std::error::Error for Overflow {}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_single_byte() {
-        for x in 0..=127u8 {
-            let mut buf = [0u8; MAX_LEN_U8];
-            let n = write_u8(&mut buf, x).len();
-            assert_eq!(n, 1, "{x}");
-            assert_eq!(buf, [x, 0], "{x}");
-        }
-    }
-
-    macro_rules! test_max {
-        ($name:ident, $write:ident, $read:ident, $type:ty) => {
-            #[test]
-            fn $name() {
-                let mut buf = [0u8; <$type as Integer>::MAX_LEN];
-                let nw = $write(&mut buf, <$type>::MAX).len();
-                assert_eq!(nw, buf.len());
-                let (got, nr) = $read(&buf).expect("should succeed");
-                assert_eq!(nr, nw);
-                assert_eq!(got, <$type>::MAX);
-            }
-        };
-    }
-    test_max!(test_max_u8, write_u8, read_u8, u8);
-    test_max!(test_max_u16, write_u16, read_u16, u16);
-    test_max!(test_max_u32, write_u32, read_u32, u32);
-    test_max!(test_max_u64, write_u64, read_u64, u64);
-    test_max!(test_max_u128, write_u128, read_u128, u128);
-    test_max!(test_max_usize, write_usize, read_usize, usize);
-
-    test_max!(test_max_i8, write_i8, read_i8, i8);
-    test_max!(test_max_i16, write_i16, read_i16, i16);
-    test_max!(test_max_i32, write_i32, read_i32, i32);
-    test_max!(test_max_i64, write_i64, read_i64, i64);
-    test_max!(test_max_i128, write_i128, read_i128, i128);
-    test_max!(test_max_isize, write_isize, read_isize, isize);
-
-    macro_rules! test_round_trip {
-        ($name:ident, $write:ident, $read:ident, $type:ty) => {
-            #[test]
-            fn $name() {
-                for x in 0..=<$type>::MAX {
-                    let mut buf = [0u8; <$type as Integer>::MAX_LEN];
-                    let nw = $write(&mut buf, x).len();
-                    let (got, nr) = $read(&buf)
-                        .unwrap_or_else(|err| panic!("#{x}: should succeed: {err:?} {buf:?}"));
-                    assert_eq!(x, got, "#{x} {buf:?}");
-                    assert_eq!(nr, nw, "#{x} {buf:?}");
-                }
-            }
-        };
-    }
-    test_round_trip!(test_round_trip_u8, write_u8, read_u8, u8);
-    test_round_trip!(test_round_trip_u16, write_u16, read_u16, u16);
-    #[cfg(not(debug_assertions))]
-    test_round_trip!(test_round_trip_u32, write_u32, read_u32, u32);
-
-    test_round_trip!(test_round_trip_i8, write_i8, read_i8, i8);
-    test_round_trip!(test_round_trip_i16, write_i16, read_i16, i16);
-    #[cfg(not(debug_assertions))]
-    test_round_trip!(test_round_trip_i32, write_i32, read_i32, i32);
-}
