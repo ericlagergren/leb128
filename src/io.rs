@@ -3,7 +3,7 @@
 
 use std::io::{Bytes, Error, Read, Result, Write};
 
-use super::{Integer, Overflow};
+use super::{Overflow, Varint};
 
 macro_rules! write_impl {
     ($type:ty, $name:ident) => {
@@ -21,7 +21,7 @@ macro_rules! write_impl {
 pub trait WriteExt: Write {
     /// Writes a LEB128-encoded integer and returns the number of
     /// bytes written.
-    fn write_int<T: Integer>(&mut self, x: T) -> Result<usize> {
+    fn write_int<T: Varint>(&mut self, x: T) -> Result<usize> {
         let mut buf = T::Buf::default();
         let encoded = x.write(&mut buf);
         self.write_all(encoded)?;
@@ -60,7 +60,7 @@ impl<W: Write + ?Sized> WriteExt for W {}
 /// integers.
 pub trait ReadExt: Read {
     /// Reads a LEB128-encoded integer.
-    fn read_int<T: Integer>(&mut self) -> Result<T> {
+    fn read_int<T: Varint>(&mut self) -> Result<T> {
         let mut iter = Iter::new(self.bytes());
         let (v, _) = T::read(&mut iter).map_err(Error::other)?;
         if let Some(err) = iter.err {
@@ -154,49 +154,47 @@ mod tests {
         ($name:ident, $type:ty, $write:ident, $read:ident) => {
             #[test]
             fn $name() {
+                fn test<F>(buf: &mut [u8], want: $type, name: &str, mut f: F)
+                where
+                    F: FnMut(&mut [u8], $type) -> Result<usize>,
+                {
+                    buf.fill(0xff);
+
+                    let got = f(buf, want).unwrap_or_else(|_| {
+                        panic!("`{name}({want}{})` should not fail", stringify!($type))
+                    });
+                    assert_eq!(
+                        got,
+                        want.encoded_len(),
+                        "`{name}({want})` != encoded_len({want})"
+                    );
+
+                    let mut tmp = (&*buf);
+                    let got = tmp
+                        .$read()
+                        .unwrap_or_else(|_| panic!("`{}` should not fail", stringify!($read)));
+                    assert_eq!(got, want, "`{}>`", stringify!($read));
+
+                    let got = (&*buf).read_int::<$type>().unwrap_or_else(|_| {
+                        panic!(
+                            "`read_int::<{}>({want})` should not fail",
+                            stringify!($type)
+                        )
+                    });
+                    assert_eq!(got, want, "`read_int::<{}>`", stringify!($type));
+                }
+
                 let mut buf = vec![0x80u8; 100];
-                for (_i, &x) in TESTS.into_iter().enumerate() {
-                    buf.clear();
-                    if let Ok(want) = x.try_into() {
-                        fn check(mut buf: &[u8], want: $type, via: &str) {
-                            let mut tmp = buf;
-                            let got = tmp.$read().unwrap_or_else(|_| {
-                                panic!(
-                                    "{want}: `{}` via `{via}` should not fail as {}",
-                                    stringify!($read),
-                                    stringify!($type)
-                                )
-                            });
-                            assert_eq!(got, want, "`{}` via `{via}`", stringify!($read));
-
-                            let got = buf.read_int::<$type>().unwrap_or_else(|_| {
-                                panic!(
-                                    "{want}: `read_int` via `{via}` should not fail as {}",
-                                    stringify!($type)
-                                )
-                            });
-                            assert_eq!(got, want, "`read_int` via `{via}`");
-                        }
-
-                        let n = buf.$write(want).unwrap_or_else(|_| {
-                            panic!(
-                                "{want}: `{}` should not fail as {}",
-                                stringify!($write),
-                                stringify!($type)
-                            )
-                        });
-                        assert_eq!(n, want.encoded_len(), "write != encoded_len({want})");
-                        check(&buf, want, stringify!($write));
-
-                        let n = buf.write_int::<$type>(want).unwrap_or_else(|_| {
-                            panic!(
-                                "{want}: `write_int::<{}>` should not fail",
-                                stringify!($type)
-                            )
-                        });
-                        assert_eq!(n, want.encoded_len(), "write_int != encoded_len({want})");
-                        check(&buf, want, "write_int");
-                    }
+                for &x in TESTS {
+                    let Ok(want) = x.try_into() else {
+                        continue;
+                    };
+                    test(&mut buf, want, stringify!($write), |mut buf, want| {
+                        buf.$write(want)
+                    });
+                    test(&mut buf, want, stringify!("write_int"), |mut buf, want| {
+                        buf.write_int(want)
+                    });
                 }
             }
         };
@@ -214,4 +212,13 @@ mod tests {
     test_impl!(test_io_i64, i64, write_i64, read_i64);
     test_impl!(test_io_i128, i128, write_i128, read_i128);
     test_impl!(test_io_isize, isize, write_isize, read_isize);
+
+    #[test]
+    fn test_idk() {
+        let mut buf = vec![0u8; 100];
+        const V: u128 = 170141183460469231731687303715884105727;
+        let got = buf.write_u128(V).unwrap();
+        let want = V.encoded_len();
+        assert_eq!(got, want);
+    }
 }

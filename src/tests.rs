@@ -3,12 +3,12 @@
 use super::*;
 
 /// Test encoding a single byte < 128, which should encode
-/// as-is.
+/// as is.
 #[test]
 fn test_single_byte() {
     for x in 0..=127u8 {
-        let mut buf = [0u8; MAX_LEN_U8];
-        let n = write_u8(&mut buf, x).len();
+        let mut buf = [0u8; u8::MAX_LEN];
+        let n = x.write(&mut buf).len();
         assert_eq!(n, 1, "{x}");
         assert_eq!(buf, [x, 0], "{x}");
     }
@@ -36,7 +36,7 @@ macro_rules! test_max {
     ($name:ident, $write:ident, $read:ident, $type:ty) => {
         #[test]
         fn $name() {
-            let mut buf = [0u8; <$type as Sealed>::MAX_LEN];
+            let mut buf = [0u8; <$type as Varint>::MAX_LEN];
             let nw = $write(&mut buf, <$type>::MAX).len();
             assert_eq!(nw, buf.len());
             let (got, nr) = $read(&buf).expect("should succeed");

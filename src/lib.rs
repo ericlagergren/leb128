@@ -32,10 +32,10 @@ extern crate alloc;
 
 mod int;
 mod io;
-mod size;
+mod slice;
 mod tests;
 
 pub use int::*;
 #[cfg(feature = "std")]
 pub use io::*;
-pub use size::*;
+pub use slice::*;
