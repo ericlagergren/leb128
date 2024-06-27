@@ -33,7 +33,6 @@ extern crate alloc;
 mod int;
 mod io;
 mod slice;
-mod tests;
 
 pub use int::*;
 #[cfg(feature = "std")]

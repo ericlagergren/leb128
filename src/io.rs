@@ -62,7 +62,7 @@ pub trait ReadExt: Read {
     /// Reads a LEB128-encoded integer.
     fn read_int<T: Varint>(&mut self) -> Result<T> {
         let mut iter = Iter::new(self.bytes());
-        let (v, _) = T::read(&mut iter).map_err(Error::other)?;
+        let (v, _) = T::read_iter(&mut iter).map_err(Error::other)?;
         if let Some(err) = iter.err {
             Err(err)
         } else {
@@ -124,7 +124,6 @@ impl<R: Read> Iterator for Iter<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::int::Sealed;
 
     const TESTS: &[i128] = &[
         -1 << 127,
@@ -173,7 +172,7 @@ mod tests {
                     let got = tmp
                         .$read()
                         .unwrap_or_else(|_| panic!("`{}` should not fail", stringify!($read)));
-                    assert_eq!(got, want, "`{}>`", stringify!($read));
+                    assert_eq!(got, want, "`{}`", stringify!($read));
 
                     let got = (&*buf).read_int::<$type>().unwrap_or_else(|_| {
                         panic!(
@@ -212,13 +211,4 @@ mod tests {
     test_impl!(test_io_i64, i64, write_i64, read_i64);
     test_impl!(test_io_i128, i128, write_i128, read_i128);
     test_impl!(test_io_isize, isize, write_isize, read_isize);
-
-    #[test]
-    fn test_idk() {
-        let mut buf = vec![0u8; 100];
-        const V: u128 = 170141183460469231731687303715884105727;
-        let got = buf.write_u128(V).unwrap();
-        let want = V.encoded_len();
-        assert_eq!(got, want);
-    }
 }
