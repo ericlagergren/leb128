@@ -1,6 +1,6 @@
 use core::mem;
 
-use super::{Util, Varint};
+use super::{Sealed, Util, Varint};
 
 macro_rules! const_assert {
     ($($tt:tt)+) => {
@@ -9,7 +9,7 @@ macro_rules! const_assert {
 }
 
 /// A sequence of [`Varint`][super::int::Varint]s.
-pub trait Seq {
+pub trait Seq: Sealed {
     /// Returns the number of bytes needed to encode the
     /// integers.
     fn encoded_len(&self) -> usize;
@@ -17,6 +17,7 @@ pub trait Seq {
 
 macro_rules! impl_slice_x8 {
     ($name:ty) => {
+        impl Sealed for &[$name] {}
         impl Seq for &[$name] {
             fn encoded_len(&self) -> usize {
                 let mut sum = 0;
@@ -33,6 +34,7 @@ impl_slice_x8!(i8);
 
 macro_rules! impl_slice_x16 {
     ($name:ty) => {
+        impl Sealed for &[$name] {}
         impl Seq for &[$name] {
             fn encoded_len(&self) -> usize {
                 let n = (self.len() / 32) * 32;
@@ -61,6 +63,7 @@ impl_slice_x16!(i16);
 
 macro_rules! impl_slice_x32 {
     ($name:ty) => {
+        impl Sealed for &[$name] {}
         impl Seq for &[$name] {
             fn encoded_len(&self) -> usize {
                 let n = (self.len() / 32) * 32;
@@ -95,6 +98,7 @@ impl_slice_x32!(i32);
 
 macro_rules! impl_slice_x64 {
     ($name:ty) => {
+        impl Sealed for &[$name] {}
         impl Seq for &[$name] {
             fn encoded_len(&self) -> usize {
                 let n = (self.len() / 32) * 32;
@@ -132,6 +136,7 @@ impl_slice_x64!(i64);
 
 macro_rules! impl_slice_x128 {
     ($name:ty) => {
+        impl Sealed for &[$name] {}
         impl Seq for &[$name] {
             fn encoded_len(&self) -> usize {
                 let mut sum = 0;
@@ -178,6 +183,7 @@ xsize_impl!("16", u16, i16);
 
 macro_rules! impl_slice_xsize {
     ($name:ty) => {
+        impl Sealed for &[$name] {}
         impl Seq for &[$name] {
             fn encoded_len(&self) -> usize {
                 let data =
@@ -195,6 +201,9 @@ impl_slice_xsize!(isize);
 macro_rules! impl_vec {
     ($($ty:ty),+ $(,)?) => {
         $(
+            #[cfg(feature = "alloc")]
+            impl Sealed for ::alloc::vec::Vec<$ty> {}
+
             #[cfg(feature = "alloc")]
             #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
             impl Seq for ::alloc::vec::Vec<$ty> {
