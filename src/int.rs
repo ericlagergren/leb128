@@ -281,7 +281,7 @@ impl fmt::Display for Overflow {
 }
 
 #[cfg(feature = "std")]
-#[cfg_attr(docs, doc(cfg(feature = "std")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 impl std::error::Error for Overflow {}
 
 #[cfg(test)]
