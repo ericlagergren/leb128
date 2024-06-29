@@ -58,7 +58,7 @@ impl<W: Write + ?Sized> WriteVarint for W {}
 
 /// Extends [`Read`] with methods for reading LEB128-encoded
 /// integers.
-pub trait ReadVarintExt: Read {
+pub trait ReadVarint: Read {
     /// Reads a LEB128-encoded integer.
     fn read_int<T: Varint>(&mut self) -> Result<T> {
         let mut iter = Iter::new(self.bytes());
@@ -85,7 +85,7 @@ pub trait ReadVarintExt: Read {
     read_impl!(isize, read_isize);
 }
 
-impl<R: Read + ?Sized> ReadVarintExt for R {}
+impl<R: Read + ?Sized> ReadVarint for R {}
 
 impl From<Overflow> for Error {
     fn from(err: Overflow) -> Self {

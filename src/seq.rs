@@ -1,7 +1,5 @@
 use core::mem;
 
-use cfg_if::cfg_if;
-
 use super::{Util, Varint};
 
 macro_rules! const_assert {
@@ -10,8 +8,8 @@ macro_rules! const_assert {
     };
 }
 
-/// A slice of [`Varint`][super::int::Varint]s.
-pub trait Slice {
+/// A sequence of [`Varint`][super::int::Varint]s.
+pub trait Seq {
     /// Returns the number of bytes needed to encode the
     /// integers.
     fn encoded_len(&self) -> usize;
@@ -19,7 +17,7 @@ pub trait Slice {
 
 macro_rules! impl_slice_x8 {
     ($name:ty) => {
-        impl Slice for &[$name] {
+        impl Seq for &[$name] {
             fn encoded_len(&self) -> usize {
                 let mut sum = 0;
                 for x in *self {
@@ -35,7 +33,7 @@ impl_slice_x8!(i8);
 
 macro_rules! impl_slice_x16 {
     ($name:ty) => {
-        impl Slice for &[$name] {
+        impl Seq for &[$name] {
             fn encoded_len(&self) -> usize {
                 let n = (self.len() / 32) * 32;
                 let mut sum = n;
@@ -63,7 +61,7 @@ impl_slice_x16!(i16);
 
 macro_rules! impl_slice_x32 {
     ($name:ty) => {
-        impl Slice for &[$name] {
+        impl Seq for &[$name] {
             fn encoded_len(&self) -> usize {
                 let n = (self.len() / 32) * 32;
                 let mut sum = n;
@@ -97,7 +95,7 @@ impl_slice_x32!(i32);
 
 macro_rules! impl_slice_x64 {
     ($name:ty) => {
-        impl Slice for &[$name] {
+        impl Seq for &[$name] {
             fn encoded_len(&self) -> usize {
                 let n = (self.len() / 32) * 32;
                 let mut sum = n;
@@ -134,7 +132,7 @@ impl_slice_x64!(i64);
 
 macro_rules! impl_slice_x128 {
     ($name:ty) => {
-        impl Slice for &[$name] {
+        impl Seq for &[$name] {
             fn encoded_len(&self) -> usize {
                 let mut sum = 0;
                 for x in *self {
@@ -148,48 +146,43 @@ macro_rules! impl_slice_x128 {
 impl_slice_x128!(u128);
 impl_slice_x128!(i128);
 
+/// # Safety
+///
+/// `Alias` must have the same memory layout as the type that
+/// `Xsize` is implemented for.
 unsafe trait Xsize {
     type Alias;
-}
-cfg_if! {
-    if #[cfg(target_pointer_width = "64")] {
-        unsafe impl Xsize for usize {
-            type Alias = u64;
-        }
-        unsafe impl Xsize for isize {
-            type Alias = i64;
-        }
-    } else if #[cfg(target_pointer_width = "32")] {
-        unsafe impl Xsize for usize {
-            type Alias = u32;
-        }
-        unsafe impl Xsize for isize {
-            type Alias = i32;
-        }
-    } else if #[cfg(target_pointer_width = "16")] {
-        unsafe impl Xsize for usize {
-            type Alias = u16;
-        }
-        unsafe impl Xsize for isize {
-            type Alias = i16;
-        }
-    } else {
-        compile_error!("unreachable")
-    }
 }
 const_assert!(mem::size_of::<usize>() == mem::size_of::<<usize as Xsize>::Alias>(),);
 const_assert!(mem::size_of::<isize>() == mem::size_of::<<isize as Xsize>::Alias>(),);
 
+macro_rules! xsize_impl {
+    ($cfg:literal, $unsigned:ty, $signed:ty) => {
+        #[cfg(target_pointer_width = $cfg)]
+        // SAFETY: `$unsigned` and `usize` have the same memory
+        // layout.
+        unsafe impl Xsize for usize {
+            type Alias = $unsigned;
+        }
+        #[cfg(target_pointer_width = $cfg)]
+        // SAFETY: `$signed` and `isize` have the same memory
+        // layout.
+        unsafe impl Xsize for isize {
+            type Alias = $signed;
+        }
+    };
+}
+xsize_impl!("64", u64, i64);
+xsize_impl!("32", u32, i32);
+xsize_impl!("16", u16, i16);
+
 macro_rules! impl_slice_xsize {
     ($name:ty) => {
-        impl_slice_xsize!($name, identity);
-    };
-    ($name:ty, $f:expr) => {
-        impl Slice for &[$name] {
+        impl Seq for &[$name] {
             fn encoded_len(&self) -> usize {
-                // SAFETY: `$name` and
-                // same memory layout.
                 let data =
+                    // SAFETY: `$name` and `Xsize::Type` have
+                    // same memory layout.
                     unsafe { &*(*self as *const [$name] as *const [<$name as Xsize>::Alias]) };
                 data.encoded_len()
             }
@@ -197,14 +190,14 @@ macro_rules! impl_slice_xsize {
     };
 }
 impl_slice_xsize!(usize);
-impl_slice_xsize!(isize, Signed::zigzag);
+impl_slice_xsize!(isize);
 
 macro_rules! impl_vec {
     ($($ty:ty),+ $(,)?) => {
         $(
             #[cfg(feature = "alloc")]
             #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
-            impl Slice for ::alloc::vec::Vec<$ty> {
+            impl Seq for ::alloc::vec::Vec<$ty> {
                 fn encoded_len(&self) -> usize {
                     self.as_slice().encoded_len()
                 }

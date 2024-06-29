@@ -28,5 +28,6 @@ jobs:
           override: true
           profile: minimal
       - run: |
+          cargo clippy --features std
           cargo install --force cargo-all-features@1.4.0
           cargo test-all-features

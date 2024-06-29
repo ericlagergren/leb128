@@ -56,6 +56,8 @@ pub trait Varint:
 macro_rules! zigzag {
     ($unsigned:ty : $x:expr) => {{
         match $x {
+            // Zigzag encoding handles sign loss.
+            #[allow(clippy::cast_sign_loss)]
             v => ((v << 1) ^ (v >> (<$unsigned>::BITS - 1))) as $unsigned,
         }
     }};
@@ -64,6 +66,11 @@ macro_rules! zigzag {
 macro_rules! unzigzag {
     ($signed:ty : $x:expr) => {{
         match $x {
+            // `(v>>1) as $signed` cannot wrap since we're
+            // shifting off one bit.
+            //
+            // `v as $signed` might wrap but it's okay.
+            #[allow(clippy::cast_possible_wrap)]
             v => {
                 ((v >> 1) as $signed)
                     ^ (v as $signed) << (<$signed>::BITS - 1) >> (<$signed>::BITS - 1)
@@ -100,7 +107,7 @@ macro_rules! encoded_len {
         match $x {
             // Same as `if v > 0x7f { 2 } else { 1 }`, but the
             // compiler generates better code.
-            v => (v > 0x7f) as usize + 1
+            v => usize::from(v > 0x7f) + 1
         }
     }};
     (@u16: $x:expr) => { encoded_len!(@def u16: $x) };
@@ -126,10 +133,10 @@ macro_rules! read_uvarint {
                 if i == <$ty as Varint>::MAX_LEN - 1 && v > MAX_LAST_BYTE {
                     return Err(Overflow(i + 1));
                 }
-                x |= (v as $ty) << s;
+                x |= <$ty>::from(v) << s;
                 return Ok((x, i + 1));
             }
-            x |= ((v & 0x7f) as $ty) << s;
+            x |= <$ty>::from(v & 0x7f) << s;
             s += 7;
         }
         Ok((0, 0))

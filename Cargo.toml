@@ -23,9 +23,6 @@ alloc = []
 # Enable `std`.
 std = ["alloc"]
 
-[dependencies]
-cfg-if = { version = "1.0.0" }
-
 [dev-dependencies]
 rust-leb128 = { path = ".", features = ["std"] }
 rand = { version = "0.8.5" }

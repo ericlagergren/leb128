@@ -32,9 +32,9 @@ extern crate alloc;
 
 mod int;
 mod io;
-mod slice;
+mod seq;
 
 pub use int::*;
 #[cfg(feature = "std")]
 pub use io::*;
-pub use slice::*;
+pub use seq::*;
