@@ -27,7 +27,7 @@ std = ["alloc"]
 cfg-if = { version = "1.0.0" }
 
 [dev-dependencies]
-leb128 = { path = ".", features = ["std"] }
+rust-leb128 = { path = ".", features = ["std"] }
 rand = { version = "0.8.5" }
 
 [package.metadata.docs.rs]
