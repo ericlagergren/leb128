@@ -234,7 +234,6 @@ macro_rules! impl_varint {
             }
             fn read(buf: &[u8]) -> Result<(Self, usize), Overflow> {
                 let (ux, n) = <$unsigned>::read(buf)?;
-                println!("{ux} {n}");
                 Ok((unzigzag!($signed: ux), n))
             }
             fn read_iter<I>(iter: I) -> Result<(Self, usize), Overflow>
@@ -242,7 +241,6 @@ macro_rules! impl_varint {
                 I: IntoIterator<Item = u8>,
             {
                 let (ux, n) = <$unsigned>::read_iter(iter)?;
-                println!("{ux} {n}");
                 Ok((unzigzag!($signed: ux), n))
             }
             fn write(self, buf: &mut Self::Buf) -> &[u8] {
