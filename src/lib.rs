@@ -1,6 +1,6 @@
 //! LEB-128 (varint) encoding.
 
-#![cfg_attr(docs, feature(doc_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(any(feature = "std", test)), no_std)]
 #![cfg_attr(not(any(feature = "std", test)), deny(clippy::std_instead_of_core))]
 #![deny(

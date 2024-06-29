@@ -375,7 +375,8 @@ mod tests {
                     let mut buf = [0u8; <$ty as Varint>::MAX_LEN];
                     let nw = x.write(&mut buf).len();
                     let got = <$ty>::read(&buf);
-                    assert_eq!(got, Ok((<$ty>::MAX, nw)), "#{x}");
+                    let want = Ok((x, nw));
+                    assert_eq!(got, want, "#{x}");
                 }
             }
         };

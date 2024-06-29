@@ -1,5 +1,5 @@
 [package]
-name = "leb128"
+name = "rust-leb128"
 version = "0.1.0"
 edition = "2021"
 description = """
@@ -12,7 +12,7 @@ keywords = [ "leb128", "varint", "encoding", "vlq" ]
 categories = [ "no-std", "no-std::no-alloc" ]
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docs)'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docsrs)'] }
 
 [features]
 default = []
@@ -21,9 +21,7 @@ default = []
 alloc = []
 
 # Enable `std`.
-std = [
-	"alloc",
-]
+std = ["alloc"]
 
 [dependencies]
 cfg-if = { version = "1.0.0" }
@@ -34,4 +32,4 @@ rand = { version = "0.8.5" }
 
 [package.metadata.docs.rs]
 all-features = true
-rustdoc-args = ["--cfg", "docs"]
+rustdoc-args = ["--cfg", "docsrs"]

@@ -1,5 +1,5 @@
 #![cfg(feature = "std")]
-#![cfg_attr(docs, doc(cfg(feature = "std")))]
+#![cfg_attr(docsrs, doc(cfg(feature = "std")))]
 
 use std::io::{Bytes, Error, Read, Result, Write};
 
@@ -18,7 +18,7 @@ macro_rules! write_impl {
 
 /// Extends [`Write`] with methods for reading LEB128-encoded
 /// integers.
-pub trait WriteExt: Write {
+pub trait WriteVarint: Write {
     /// Writes a LEB128-encoded integer and returns the number of
     /// bytes written.
     fn write_int<T: Varint>(&mut self, x: T) -> Result<usize> {
@@ -54,11 +54,11 @@ macro_rules! read_impl {
     };
 }
 
-impl<W: Write + ?Sized> WriteExt for W {}
+impl<W: Write + ?Sized> WriteVarint for W {}
 
 /// Extends [`Read`] with methods for reading LEB128-encoded
 /// integers.
-pub trait ReadExt: Read {
+pub trait ReadVarintExt: Read {
     /// Reads a LEB128-encoded integer.
     fn read_int<T: Varint>(&mut self) -> Result<T> {
         let mut iter = Iter::new(self.bytes());
@@ -85,7 +85,7 @@ pub trait ReadExt: Read {
     read_impl!(isize, read_isize);
 }
 
-impl<R: Read + ?Sized> ReadExt for R {}
+impl<R: Read + ?Sized> ReadVarintExt for R {}
 
 impl From<Overflow> for Error {
     fn from(err: Overflow) -> Self {

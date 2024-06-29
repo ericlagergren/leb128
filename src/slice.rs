@@ -21,8 +21,7 @@ macro_rules! impl_slice_x8 {
     ($name:ty) => {
         impl Slice for &[$name] {
             fn encoded_len(&self) -> usize {
-                let n = (self.len() / 32) * 32;
-                let mut sum = n;
+                let mut sum = 0;
                 for x in *self {
                     sum += x.to_unsigned().encoded_len();
                 }
@@ -133,6 +132,22 @@ macro_rules! impl_slice_x64 {
 impl_slice_x64!(u64);
 impl_slice_x64!(i64);
 
+macro_rules! impl_slice_x128 {
+    ($name:ty) => {
+        impl Slice for &[$name] {
+            fn encoded_len(&self) -> usize {
+                let mut sum = 0;
+                for x in *self {
+                    sum += x.to_unsigned().encoded_len();
+                }
+                sum
+            }
+        }
+    };
+}
+impl_slice_x128!(u128);
+impl_slice_x128!(i128);
+
 unsafe trait Xsize {
     type Alias;
 }
@@ -188,6 +203,7 @@ macro_rules! impl_vec {
     ($($ty:ty),+ $(,)?) => {
         $(
             #[cfg(feature = "alloc")]
+            #[cfg_attr(docsrs, doc(cfg(feature = "alloc")))]
             impl Slice for ::alloc::vec::Vec<$ty> {
                 fn encoded_len(&self) -> usize {
                     self.as_slice().encoded_len()
@@ -196,10 +212,9 @@ macro_rules! impl_vec {
         )+
     }
 }
-// TODO: u128/i128
 impl_vec! {
-    u8, u16, u32, u64, usize,
-    i8, i16, i32, i64, isize,
+    u8, u16, u32, u64, u128, usize,
+    i8, i16, i32, i64, i128, isize,
 }
 
 #[cfg(test)]
