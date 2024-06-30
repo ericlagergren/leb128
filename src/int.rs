@@ -1,18 +1,53 @@
-use core::{fmt, fmt::Debug, hash::Hash};
+use core::{
+    fmt::{self, Debug},
+    hash::Hash,
+    iter::{ExactSizeIterator, FusedIterator},
+};
 
 mod private {
-    pub trait Sealed {}
-}
-pub(crate) use private::Sealed;
+    use core::{fmt::Debug, hash::Hash};
 
-pub(crate) trait Util {
-    type Unsigned;
-    fn to_unsigned(self) -> Self::Unsigned;
+    pub trait Sealed {}
+    pub trait Integer: Sealed {
+        type Unsigned: Clone
+            + Copy
+            + Debug
+            + Default
+            + Eq
+            + Hash
+            + Ord
+            + PartialEq
+            + PartialOrd
+            + Sized;
+        fn to_unsigned(self) -> Self::Unsigned;
+    }
 }
+pub(crate) use private::{Integer, Sealed};
 
 /// An integer that can be LEB128-encoded.
+///
+/// It is implemented by all [integer types], including `usize`
+/// and `isize`.
+///
+/// # Example
+///
+/// ```rust
+/// use rust_leb128::Varint;
+///
+/// let x: u64 = 12009733384289536743;
+/// let mut buf = [0u8; u64::MAX_LEN];
+/// let got = x.write(&mut buf);
+/// let want = [
+///     0xe7, 0x95, 0xe9, 0xcd,
+///     0x9f, 0x9c, 0xc9, 0xd5,
+///     0xa6, 0x1,
+/// ];
+/// assert_eq!(got, want);
+/// ```
+///
+/// [integer types]: https://doc.rust-lang.org/reference/types/numeric.html#integer-types
 pub trait Varint:
-    Clone + Copy + Debug + Default + Eq + Hash + Ord + PartialEq + PartialOrd + Sized + Sealed
+    Clone + Copy + Debug + Default + Eq + Hash + Ord + PartialEq + PartialOrd + Sized + Integer
 {
     /// The maximum size in bytes of the encoded integer.
     const MAX_LEN: usize;
@@ -39,11 +74,11 @@ pub trait Varint:
     where
         I: IntoIterator<Item = u8>;
 
-    /// Encodes `x` into `buf` in LEB128 format, returning
+    /// Encodes itself into `buf` in LEB128 format, returning
     /// the portion of `buf` that was written to.
     fn write(self, buf: &mut Self::Buf) -> &[u8];
 
-    /// Tries to encode `x` in LEB128 format.
+    /// Tries to encode itself in LEB128 format.
     ///
     /// It returns the portion of `buf` that was written to,
     /// or `None` if `buf` is too small to fit `x`.
@@ -51,6 +86,10 @@ pub trait Varint:
     /// In order to succeed, `buf` should be at least
     /// [`encoded_len`][Self::encoded_len] bytes.
     fn try_write(self, buf: &mut [u8]) -> Option<&[u8]>;
+
+    /// Returns an interator over the bytes of the LEB128 encoded
+    /// integer.
+    fn into_iter(self) -> Iter<Self>;
 }
 
 macro_rules! zigzag {
@@ -102,7 +141,6 @@ macro_rules! encoded_len {
             }
         }
     }};
-
     (@u8: $x:expr) => {{
         match $x {
             // Same as `if v > 0x7f { 2 } else { 1 }`, but the
@@ -151,13 +189,6 @@ macro_rules! read_uvarint {
 }
 
 macro_rules! write_uvarint {
-    ($ty:tt: $x:expr, $buf:expr) => { write_uvarint!(@ $ty: $x, $buf) };
-    (@u8: $x:expr, $buf:expr) => { write_uvarint!(@imp u8: $x, $buf) };
-    (@u16: $x:expr, $buf:expr) => { write_uvarint!(@imp u16: $x, $buf) };
-    (@u32: $x:expr, $buf:expr) => { write_uvarint!(@imp u32: $x, $buf) };
-    (@u64: $x:expr, $buf:expr) => { write_uvarint!(@imp u64: $x, $buf) };
-    (@u128: $x:expr, $buf:expr) => { write_uvarint!(@imp u128: $x, $buf) };
-    (@usize: $x:expr, $buf:expr) => { write_uvarint!(@imp usize: $x, $buf) };
     (@imp $ty:ty : $x:expr, $buf:expr) => {{
         // The compiler can prove that all indexing is in
         // bounds.
@@ -178,6 +209,13 @@ macro_rules! write_uvarint {
             }
         }
     }};
+    (@u8: $x:expr, $buf:expr) => { write_uvarint!(@imp u8: $x, $buf) };
+    (@u16: $x:expr, $buf:expr) => { write_uvarint!(@imp u16: $x, $buf) };
+    (@u32: $x:expr, $buf:expr) => { write_uvarint!(@imp u32: $x, $buf) };
+    (@u64: $x:expr, $buf:expr) => { write_uvarint!(@imp u64: $x, $buf) };
+    (@u128: $x:expr, $buf:expr) => { write_uvarint!(@imp u128: $x, $buf) };
+    (@usize: $x:expr, $buf:expr) => { write_uvarint!(@imp usize: $x, $buf) };
+    ($ty:tt: $x:expr, $buf:expr) => { write_uvarint!(@ $ty: $x, $buf) };
 }
 
 macro_rules! try_write_uvarint {
@@ -200,9 +238,58 @@ macro_rules! try_write_uvarint {
     }};
 }
 
+macro_rules! impl_iter {
+    ($ty:ty) => {
+        impl Iterator for Iter<$ty> {
+            type Item = u8;
+
+            fn next(&mut self) -> Option<Self::Item> {
+                let Some(x) = self.v else {
+                    return None;
+                };
+                let mut b = (x as u8);
+                if x >= 0x80 {
+                    b |= 0x80;
+                    self.v = Some(x >> 7);
+                } else {
+                    self.v = None;
+                }
+                Some(b)
+            }
+
+            fn size_hint(&self) -> (usize, Option<usize>) {
+                match self.v {
+                    Some(v) => {
+                        let n = v.encoded_len();
+                        (n, Some(n))
+                    }
+                    None => (0, None),
+                }
+            }
+        }
+
+        impl FusedIterator for Iter<$ty> {}
+
+        impl ExactSizeIterator for Iter<$ty> {
+            fn len(&self) -> usize {
+                match self.v {
+                    Some(v) => v.encoded_len(),
+                    None => 0,
+                }
+            }
+        }
+    };
+}
+
 macro_rules! impl_varint {
-    ($unsigned:tt => $signed:tt) => {
+    ($unsigned:tt, $signed:tt) => {
         impl Sealed for $unsigned {}
+        impl Integer for $unsigned {
+            type Unsigned = $unsigned;
+            fn to_unsigned(self) -> Self::Unsigned {
+                self
+            }
+        }
         impl Varint for $unsigned {
             const MAX_LEN: usize = ((<$unsigned>::BITS + 6) / 7) as usize;
             type Buf = [u8; Self::MAX_LEN];
@@ -224,15 +311,19 @@ macro_rules! impl_varint {
             fn try_write(self, buf: &mut [u8]) -> Option<&[u8]> {
                 try_write_uvarint!($unsigned: self, buf)
             }
-        }
-        impl Util for $unsigned {
-            type Unsigned = $unsigned;
-            fn to_unsigned(self) -> Self::Unsigned {
-                self
+            fn into_iter(self) -> Iter<Self> {
+                Iter { v: Some(self) }
             }
         }
+        impl_iter!($unsigned);
 
         impl Sealed for $signed {}
+        impl Integer for $signed {
+            type Unsigned = $unsigned;
+            fn to_unsigned(self) -> Self::Unsigned {
+                zigzag!($unsigned: self)
+            }
+        }
         impl Varint for $signed {
             const MAX_LEN: usize = ((<$signed>::BITS + 6) / 7) as usize;
             type Buf = [u8; Self::MAX_LEN];
@@ -256,21 +347,26 @@ macro_rules! impl_varint {
             fn try_write(self, buf: &mut [u8]) -> Option<&[u8]> {
                 zigzag!($unsigned: self).try_write(buf)
             }
-        }
-        impl Util for $signed {
-            type Unsigned = $unsigned;
-            fn to_unsigned(self) -> Self::Unsigned {
-                zigzag!($unsigned: self)
+            fn into_iter(self) -> Iter<Self> {
+                Iter { v: Some(self.to_unsigned()) }
             }
         }
+        impl_iter!($signed);
     }
 }
-impl_varint!(u8 => i8);
-impl_varint!(u16 => i16);
-impl_varint!(u32 => i32);
-impl_varint!(u64 => i64);
-impl_varint!(u128 => i128);
-impl_varint!(usize => isize);
+impl_varint!(u8, i8);
+impl_varint!(u16, i16);
+impl_varint!(u32, i32);
+impl_varint!(u64, i64);
+impl_varint!(u128, i128);
+impl_varint!(usize, isize);
+
+/// An iterator over the bytes in a LEB128 encoded [`Varint`].
+#[derive(Clone, Debug)]
+#[must_use]
+pub struct Iter<T: Varint> {
+    v: Option<T::Unsigned>,
+}
 
 /// The encoded integer overflows the type.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -281,7 +377,7 @@ pub struct Overflow(
 
 impl fmt::Display for Overflow {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("integer overflow")
+        f.write_str("varint overflow")
     }
 }
 
@@ -382,6 +478,9 @@ mod tests {
                     let got = <$ty>::read(&buf);
                     let want = Ok((x, nw));
                     assert_eq!(got, want, "#{x}");
+
+                    let got = <$ty>::read_iter(x.into_iter());
+                    assert_eq!(got, want);
                 }
             }
         };
@@ -395,4 +494,50 @@ mod tests {
     test_round_trip!(test_round_trip_i16, i16);
     #[cfg(not(debug_assertions))]
     test_round_trip!(test_round_trip_i32, i32);
+
+    macro_rules! test_overflow {
+        ($name:ident, $ty:ty) => {
+            #[test]
+            fn $name() {
+                const MAX_LAST_BYTE: u8 = (1 << (<$ty>::BITS % 7)) - 1;
+                let tests: [(Vec<u8>, &[u8], usize); 4] = [
+                    // Last byte is too large.
+                    (
+                        vec![0x80; <$ty>::MAX_LEN - 1],
+                        &[MAX_LAST_BYTE + 1],
+                        <$ty>::MAX_LEN,
+                    ),
+                    // Encoded varint is too large.
+                    (vec![0x80; <$ty>::MAX_LEN + 1], &[], <$ty>::MAX_LEN + 1),
+                    // Last byte is too large.
+                    (
+                        vec![0xff; <$ty>::MAX_LEN - 1],
+                        &[MAX_LAST_BYTE + 1],
+                        <$ty>::MAX_LEN,
+                    ),
+                    // Encoded varint is too large.
+                    (vec![0xff; <$ty>::MAX_LEN + 1], &[], <$ty>::MAX_LEN + 1),
+                ];
+                for (i, (mut input, extra, nr)) in tests.into_iter().enumerate() {
+                    input.extend_from_slice(extra);
+                    let got = <$ty>::read(&input);
+                    let want = Err(Overflow(nr));
+                    assert_eq!(got, want, "#{i}");
+                }
+            }
+        };
+    }
+    test_overflow!(test_overflow_u8, u8);
+    test_overflow!(test_overflow_u16, u16);
+    test_overflow!(test_overflow_u32, u32);
+    test_overflow!(test_overflow_u64, u64);
+    test_overflow!(test_overflow_u128, u128);
+    test_overflow!(test_overflow_usize, usize);
+
+    test_overflow!(test_overflow_i8, i8);
+    test_overflow!(test_overflow_i16, i16);
+    test_overflow!(test_overflow_i32, i32);
+    test_overflow!(test_overflow_i64, i64);
+    test_overflow!(test_overflow_i128, i128);
+    test_overflow!(test_overflow_isize, isize);
 }

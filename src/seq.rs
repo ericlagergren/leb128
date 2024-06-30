@@ -1,6 +1,6 @@
 use core::mem;
 
-use super::{Sealed, Util, Varint};
+use super::{Integer, Sealed, Varint};
 
 macro_rules! const_assert {
     ($($tt:tt)+) => {
@@ -243,14 +243,15 @@ mod tests {
             }
         };
     }
-    test_encoded_len!(test_encoded_len_usize, usize);
-    test_encoded_len!(test_encoded_len_isize, isize);
-    test_encoded_len!(test_encoded_len_u64, u64);
-    test_encoded_len!(test_encoded_len_i64, i64);
-    test_encoded_len!(test_encoded_len_u32, u32);
-    test_encoded_len!(test_encoded_len_i32, i32);
-    test_encoded_len!(test_encoded_len_u16, u16);
-    test_encoded_len!(test_encoded_len_i16, i16);
     test_encoded_len!(test_encoded_len_u8, u8);
+    test_encoded_len!(test_encoded_len_u16, u16);
+    test_encoded_len!(test_encoded_len_u32, u32);
+    test_encoded_len!(test_encoded_len_u64, u64);
+    test_encoded_len!(test_encoded_len_usize, usize);
+
     test_encoded_len!(test_encoded_len_i8, i8);
+    test_encoded_len!(test_encoded_len_i16, i16);
+    test_encoded_len!(test_encoded_len_i32, i32);
+    test_encoded_len!(test_encoded_len_i64, i64);
+    test_encoded_len!(test_encoded_len_isize, isize);
 }
