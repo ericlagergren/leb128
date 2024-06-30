@@ -244,9 +244,7 @@ macro_rules! impl_iter {
             type Item = u8;
 
             fn next(&mut self) -> Option<Self::Item> {
-                let Some(x) = self.v else {
-                    return None;
-                };
+                let x = self.v?;
                 let mut b = (x as u8);
                 if x >= 0x80 {
                     b |= 0x80;
