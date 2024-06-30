@@ -1,4 +1,12 @@
-//! LEB-128 (varint) encoding.
+//! LEB128 (varint) encoding.
+//!
+//! # Features
+//!
+//! - `alloc`: enable [`alloc`].
+//! - `std`: enable [`std`] (implies `alloc`).
+//!
+//! [`alloc`]: https://doc.rust-lang.org/alloc/
+//! [`std`]: https://doc.rust-lang.org/std/
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(any(feature = "std", test)), no_std)]
